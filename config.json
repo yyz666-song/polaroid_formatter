@@ -12,10 +12,16 @@
     "width_ratio": 0.78
   },
   "background": {
-    "blur_radius": 60,
+    "bg_safe_crop_pct": 0.14,
+    "bg_extra_scale": 1.25,
     "brightness": 0.82,
     "saturation": 0.75
   },
+  "sharpen_enabled": true,
+  "sharpen_target": "foreground",
+  "sharpen_radius": 1.6,
+  "sharpen_percent": 150,
+  "sharpen_threshold": 3,
   "jpeg_quality": 92,
   "move_processed_to_done": true,
   "supported_extensions": [".jpg", ".jpeg", ".png", ".webp"]

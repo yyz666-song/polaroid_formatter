@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Batch formatter for polaroid scanned photos.
-
-Features:
-- Fixed canvas output.
-- Foreground image uses contain fitting (no crop).
-- Background uses cover fitting from same image + blur + tone adjustments.
-- EXIF orientation correction.
-- Configurable via JSON.
-"""
+"""Batch formatter for polaroid scanned photos."""
 
 from __future__ import annotations
 
@@ -20,6 +12,8 @@ from pathlib import Path
 from typing import Iterable
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+
+MIN_SAFE_KEEP_RATIO = 0.60
 
 
 @dataclass
@@ -35,9 +29,19 @@ class Foreground:
 
 @dataclass
 class Background:
-    blur_radius: float
+    safe_crop_pct: float
+    extra_scale: float
     brightness: float
     saturation: float
+
+
+@dataclass
+class Sharpen:
+    enabled: bool
+    target: str
+    radius: float
+    percent: int
+    threshold: int
 
 
 @dataclass
@@ -50,30 +54,17 @@ class Config:
     canvas: Canvas
     foreground: Foreground
     background: Background
+    sharpen: Sharpen
     jpeg_quality: int
     move_processed_to_done: bool
     supported_extensions: tuple[str, ...]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="批量处理宝丽来扫描图，输出统一版式 JPEG。"
-    )
-    parser.add_argument(
-        "--config",
-        default="config.json",
-        help="配置文件路径（默认: config.json）",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="仅打印将要处理的文件，不实际写出/移动",
-    )
-    parser.add_argument(
-        "--once",
-        action="store_true",
-        help="单次运行后退出（为兼容自动化流程保留该参数）",
-    )
+    parser = argparse.ArgumentParser(description="批量处理宝丽来扫描图，输出统一版式 JPEG。")
+    parser.add_argument("--config", default="config.json", help="配置文件路径（默认: config.json）")
+    parser.add_argument("--dry-run", action="store_true", help="仅打印将要处理的文件，不实际写出/移动")
+    parser.add_argument("--once", action="store_true", help="单次运行后退出（为兼容自动化流程保留该参数）")
     return parser.parse_args()
 
 
@@ -87,11 +78,23 @@ def load_config(path: Path) -> Config:
     try:
         canvas = Canvas(width=int(raw["canvas"]["width"]), height=int(raw["canvas"]["height"]))
         foreground = Foreground(width_ratio=float(raw["foreground"]["width_ratio"]))
+
+        bg_raw = raw.get("background", {})
         background = Background(
-            blur_radius=float(raw["background"]["blur_radius"]),
-            brightness=float(raw["background"]["brightness"]),
-            saturation=float(raw["background"]["saturation"]),
+            safe_crop_pct=float(bg_raw.get("bg_safe_crop_pct", 0.14)),
+            extra_scale=float(bg_raw.get("bg_extra_scale", 1.25)),
+            brightness=float(bg_raw.get("brightness", 0.82)),
+            saturation=float(bg_raw.get("saturation", 0.75)),
         )
+
+        sharpen = Sharpen(
+            enabled=bool(raw.get("sharpen_enabled", True)),
+            target=str(raw.get("sharpen_target", "foreground")).lower(),
+            radius=float(raw.get("sharpen_radius", 1.6)),
+            percent=int(raw.get("sharpen_percent", 150)),
+            threshold=int(raw.get("sharpen_threshold", 3)),
+        )
+
         config = Config(
             inbox_dir=Path(raw["inbox_dir"]),
             out_dir=Path(raw["out_dir"]),
@@ -101,6 +104,7 @@ def load_config(path: Path) -> Config:
             canvas=canvas,
             foreground=foreground,
             background=background,
+            sharpen=sharpen,
             jpeg_quality=int(raw.get("jpeg_quality", 92)),
             move_processed_to_done=bool(raw.get("move_processed_to_done", True)),
             supported_extensions=tuple(
@@ -119,19 +123,27 @@ def validate_config(config: Config) -> None:
         raise ValueError("canvas.width 和 canvas.height 必须为正整数")
     if not (0 < config.foreground.width_ratio <= 1):
         raise ValueError("foreground.width_ratio 必须在 (0, 1] 范围内")
-    if config.background.blur_radius < 0:
-        raise ValueError("background.blur_radius 不能为负数")
+    if not (0 <= config.background.safe_crop_pct < 0.5):
+        raise ValueError("background.bg_safe_crop_pct 必须在 [0, 0.5) 范围内")
+    if config.background.extra_scale < 1.0:
+        raise ValueError("background.bg_extra_scale 不能小于 1.0")
     if config.jpeg_quality < 1 or config.jpeg_quality > 100:
         raise ValueError("jpeg_quality 必须在 1~100 范围内")
+    if config.sharpen.target not in {"foreground", "all"}:
+        raise ValueError("sharpen_target 仅支持 foreground 或 all")
+    if config.sharpen.radius < 0:
+        raise ValueError("sharpen_radius 不能为负数")
+    if config.sharpen.percent < 0:
+        raise ValueError("sharpen_percent 不能为负数")
+    if config.sharpen.threshold < 0:
+        raise ValueError("sharpen_threshold 不能为负数")
 
 
 def iter_images(inbox: Path, exts: tuple[str, ...]) -> Iterable[Path]:
     if not inbox.exists():
         return []
-    allowed = set(ext.lower() for ext in exts)
-    return sorted(
-        p for p in inbox.iterdir() if p.is_file() and p.suffix.lower() in allowed
-    )
+    allowed = {ext.lower() for ext in exts}
+    return sorted(p for p in inbox.iterdir() if p.is_file() and p.suffix.lower() in allowed)
 
 
 def resize_cover(img: Image.Image, target_size: tuple[int, int]) -> Image.Image:
@@ -146,6 +158,57 @@ def resize_cover(img: Image.Image, target_size: tuple[int, int]) -> Image.Image:
 
 def resize_contain(img: Image.Image, max_size: tuple[int, int]) -> Image.Image:
     return ImageOps.contain(img, max_size, method=Image.Resampling.LANCZOS)
+
+
+def apply_safe_crop(img: Image.Image, crop_pct: float) -> Image.Image:
+    """Crop same percent from all sides with safety fallback.
+
+    If requested crop is too aggressive, clamp to keep at least 60% width/height.
+    """
+    if crop_pct <= 0:
+        return img
+
+    max_crop_by_keep = (1.0 - MIN_SAFE_KEEP_RATIO) / 2.0
+    effective_crop = min(crop_pct, max_crop_by_keep)
+
+    left = int(round(img.width * effective_crop))
+    top = int(round(img.height * effective_crop))
+    right = img.width - left
+    bottom = img.height - top
+
+    cropped_w = right - left
+    cropped_h = bottom - top
+    if cropped_w < 1 or cropped_h < 1:
+        return img
+
+    return img.crop((left, top, right, bottom))
+
+
+def build_background(corrected: Image.Image, cfg: Config) -> Image.Image:
+    canvas_size = (cfg.canvas.width, cfg.canvas.height)
+    bg_src = apply_safe_crop(corrected, cfg.background.safe_crop_pct)
+
+    # 先按更大目标做 cover，再中心裁回画布，实现“额外放大”且不露边。
+    scaled_target = (
+        int(round(cfg.canvas.width * cfg.background.extra_scale)),
+        int(round(cfg.canvas.height * cfg.background.extra_scale)),
+    )
+    scaled_cover = resize_cover(bg_src, scaled_target)
+    bg = resize_cover(scaled_cover, canvas_size)
+
+    bg = ImageEnhance.Color(bg).enhance(cfg.background.saturation)
+    bg = ImageEnhance.Brightness(bg).enhance(cfg.background.brightness)
+    return bg
+
+
+def apply_unsharp(img: Image.Image, sharpen: Sharpen) -> Image.Image:
+    return img.filter(
+        ImageFilter.UnsharpMask(
+            radius=sharpen.radius,
+            percent=sharpen.percent,
+            threshold=sharpen.threshold,
+        )
+    )
 
 
 def process_one(image_path: Path, cfg: Config, dry_run: bool = False) -> None:
@@ -163,26 +226,24 @@ def process_one(image_path: Path, cfg: Config, dry_run: bool = False) -> None:
         return
 
     with Image.open(image_path) as src:
-        # 修正 EXIF 方向，避免因扫描/拍摄元数据导致旋转错误。
         corrected = ImageOps.exif_transpose(src).convert("RGB")
 
-        # 背景层：先 cover 再 blur，避免边缘露底。
-        bg = resize_cover(corrected, canvas_size)
-        bg = bg.filter(ImageFilter.GaussianBlur(radius=cfg.background.blur_radius))
-        bg = ImageEnhance.Color(bg).enhance(cfg.background.saturation)
-        bg = ImageEnhance.Brightness(bg).enhance(cfg.background.brightness)
+        bg = build_background(corrected, cfg)
 
-        # 前景层：按 contain 缩放，不裁切，并限制宽度占比。
         target_fg_w = int(cfg.canvas.width * cfg.foreground.width_ratio)
         fg = resize_contain(corrected, (target_fg_w, cfg.canvas.height))
 
-        # 合成：前景居中。
+        if cfg.sharpen.enabled and cfg.sharpen.target in {"foreground", "all"}:
+            fg = apply_unsharp(fg, cfg.sharpen)
+
         composed = bg.copy()
         x = (cfg.canvas.width - fg.width) // 2
         y = (cfg.canvas.height - fg.height) // 2
         composed.paste(fg, (x, y))
 
-        # 转换到 sRGB 语义下导出 JPEG（RGB）。
+        if cfg.sharpen.enabled and cfg.sharpen.target == "all":
+            composed = apply_unsharp(composed, cfg.sharpen)
+
         composed = composed.convert("RGB")
         composed.save(
             output_path,
@@ -223,7 +284,7 @@ def main() -> int:
         for img_path in images:
             try:
                 process_one(img_path, cfg, dry_run=args.dry_run)
-            except Exception as exc:  # noqa: BLE001 - 逐文件容错，继续批处理
+            except Exception as exc:  # noqa: BLE001
                 print(f"[ERROR] 处理失败 {img_path.name}: {exc}", file=sys.stderr)
 
         if args.once:
@@ -231,7 +292,7 @@ def main() -> int:
 
         print("[INFO] 处理完成。")
         return 0
-    except Exception as exc:  # noqa: BLE001 - 顶层兜底，输出清晰错误
+    except Exception as exc:  # noqa: BLE001
         print(f"[FATAL] {exc}", file=sys.stderr)
         return 1
 

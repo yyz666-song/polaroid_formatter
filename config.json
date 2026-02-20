@@ -1,0 +1,22 @@
+{
+  "inbox_dir": "inbox",
+  "out_dir": "out",
+  "done_dir": "done",
+  "output_suffix": "_fmt",
+  "output_extension": "jpg",
+  "canvas": {
+    "width": 2160,
+    "height": 2700
+  },
+  "foreground": {
+    "width_ratio": 0.78
+  },
+  "background": {
+    "blur_radius": 60,
+    "brightness": 0.82,
+    "saturation": 0.75
+  },
+  "jpeg_quality": 92,
+  "move_processed_to_done": true,
+  "supported_extensions": [".jpg", ".jpeg", ".png", ".webp"]
+}

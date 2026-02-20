@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import sys
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from typing import Iterable
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 MIN_SAFE_KEEP_RATIO = 0.60
+GOLDEN_RATIO = 1.618
 
 
 @dataclass
@@ -24,12 +26,21 @@ class Canvas:
 
 @dataclass
 class Foreground:
-    width_ratio: float
+    paper_scale_mode: str
+    paper_scale_override: float | None
+
+
+@dataclass
+class SafeCrop:
+    left: float
+    right: float
+    top: float
+    bottom: float
 
 
 @dataclass
 class Background:
-    safe_crop_pct: float
+    safe_crop: SafeCrop
     extra_scale: float
     brightness: float
     saturation: float
@@ -77,12 +88,27 @@ def load_config(path: Path) -> Config:
 
     try:
         canvas = Canvas(width=int(raw["canvas"]["width"]), height=int(raw["canvas"]["height"]))
-        foreground = Foreground(width_ratio=float(raw["foreground"]["width_ratio"]))
+
+        fg_raw = raw.get("foreground", {})
+        foreground = Foreground(
+            paper_scale_mode=str(fg_raw.get("paper_scale_mode", "golden")).lower(),
+            paper_scale_override=(
+                None
+                if fg_raw.get("paper_scale_override") is None
+                else float(fg_raw.get("paper_scale_override"))
+            ),
+        )
 
         bg_raw = raw.get("background", {})
+        crop_raw = bg_raw.get("bg_safe_crop", {})
         background = Background(
-            safe_crop_pct=float(bg_raw.get("bg_safe_crop_pct", 0.14)),
-            extra_scale=float(bg_raw.get("bg_extra_scale", 1.25)),
+            safe_crop=SafeCrop(
+                left=float(crop_raw.get("l", 0.10)),
+                right=float(crop_raw.get("r", 0.10)),
+                top=float(crop_raw.get("t", 0.10)),
+                bottom=float(crop_raw.get("b", 0.22)),
+            ),
+            extra_scale=float(bg_raw.get("bg_extra_scale", 1.35)),
             brightness=float(bg_raw.get("brightness", 0.82)),
             saturation=float(bg_raw.get("saturation", 0.75)),
         )
@@ -121,22 +147,34 @@ def load_config(path: Path) -> Config:
 def validate_config(config: Config) -> None:
     if config.canvas.width <= 0 or config.canvas.height <= 0:
         raise ValueError("canvas.width 和 canvas.height 必须为正整数")
-    if not (0 < config.foreground.width_ratio <= 1):
-        raise ValueError("foreground.width_ratio 必须在 (0, 1] 范围内")
-    if not (0 <= config.background.safe_crop_pct < 0.5):
-        raise ValueError("background.bg_safe_crop_pct 必须在 [0, 0.5) 范围内")
+    if config.foreground.paper_scale_mode not in {"golden", "fit"}:
+        raise ValueError("foreground.paper_scale_mode 仅支持 golden 或 fit")
+    if config.foreground.paper_scale_override is not None and not (0 < config.foreground.paper_scale_override <= 1):
+        raise ValueError("foreground.paper_scale_override 必须在 (0, 1] 范围")
+
+    crop = config.background.safe_crop
+    for name, value in {
+        "background.bg_safe_crop.l": crop.left,
+        "background.bg_safe_crop.r": crop.right,
+        "background.bg_safe_crop.t": crop.top,
+        "background.bg_safe_crop.b": crop.bottom,
+    }.items():
+        if value < 0:
+            raise ValueError(f"{name} 不能为负数")
+
+    if crop.left + crop.right >= (1 - MIN_SAFE_KEEP_RATIO):
+        raise ValueError("background.bg_safe_crop 左右裁切总和过大")
+    if crop.top + crop.bottom >= (1 - MIN_SAFE_KEEP_RATIO):
+        raise ValueError("background.bg_safe_crop 上下裁切总和过大")
+
     if config.background.extra_scale < 1.0:
         raise ValueError("background.bg_extra_scale 不能小于 1.0")
     if config.jpeg_quality < 1 or config.jpeg_quality > 100:
         raise ValueError("jpeg_quality 必须在 1~100 范围内")
     if config.sharpen.target not in {"foreground", "all"}:
         raise ValueError("sharpen_target 仅支持 foreground 或 all")
-    if config.sharpen.radius < 0:
-        raise ValueError("sharpen_radius 不能为负数")
-    if config.sharpen.percent < 0:
-        raise ValueError("sharpen_percent 不能为负数")
-    if config.sharpen.threshold < 0:
-        raise ValueError("sharpen_threshold 不能为负数")
+    if config.sharpen.radius < 0 or config.sharpen.percent < 0 or config.sharpen.threshold < 0:
+        raise ValueError("锐化参数不能为负数")
 
 
 def iter_images(inbox: Path, exts: tuple[str, ...]) -> Iterable[Path]:
@@ -160,35 +198,63 @@ def resize_contain(img: Image.Image, max_size: tuple[int, int]) -> Image.Image:
     return ImageOps.contain(img, max_size, method=Image.Resampling.LANCZOS)
 
 
-def apply_safe_crop(img: Image.Image, crop_pct: float) -> Image.Image:
-    """Crop same percent from all sides with safety fallback.
+def _clamp_non_symmetric_crop(crop: SafeCrop) -> SafeCrop:
+    max_pair_crop = 1.0 - MIN_SAFE_KEEP_RATIO
 
-    If requested crop is too aggressive, clamp to keep at least 60% width/height.
-    """
-    if crop_pct <= 0:
-        return img
+    lr_total = crop.left + crop.right
+    tb_total = crop.top + crop.bottom
 
-    max_crop_by_keep = (1.0 - MIN_SAFE_KEEP_RATIO) / 2.0
-    effective_crop = min(crop_pct, max_crop_by_keep)
+    if lr_total > max_pair_crop and lr_total > 0:
+        scale = max_pair_crop / lr_total
+        left = crop.left * scale
+        right = crop.right * scale
+    else:
+        left = crop.left
+        right = crop.right
 
-    left = int(round(img.width * effective_crop))
-    top = int(round(img.height * effective_crop))
-    right = img.width - left
-    bottom = img.height - top
+    if tb_total > max_pair_crop and tb_total > 0:
+        scale = max_pair_crop / tb_total
+        top = crop.top * scale
+        bottom = crop.bottom * scale
+    else:
+        top = crop.top
+        bottom = crop.bottom
+
+    return SafeCrop(left=left, right=right, top=top, bottom=bottom)
+
+
+def apply_safe_crop(img: Image.Image, crop: SafeCrop) -> Image.Image:
+    """Apply non-symmetric crop; fallback to safe minimum keep ratio if too aggressive."""
+    safe_crop = _clamp_non_symmetric_crop(crop)
+
+    left = int(round(img.width * safe_crop.left))
+    right = img.width - int(round(img.width * safe_crop.right))
+    top = int(round(img.height * safe_crop.top))
+    bottom = img.height - int(round(img.height * safe_crop.bottom))
 
     cropped_w = right - left
     cropped_h = bottom - top
-    if cropped_w < 1 or cropped_h < 1:
+    min_w = max(1, int(math.floor(img.width * MIN_SAFE_KEEP_RATIO)))
+    min_h = max(1, int(math.floor(img.height * MIN_SAFE_KEEP_RATIO)))
+
+    if cropped_w < min_w or cropped_h < min_h or cropped_w < 1 or cropped_h < 1:
         return img
 
     return img.crop((left, top, right, bottom))
 
 
+def get_paper_scale_ratio(cfg: Config) -> float:
+    if cfg.foreground.paper_scale_override is not None:
+        return cfg.foreground.paper_scale_override
+    if cfg.foreground.paper_scale_mode == "golden":
+        return 1.0 / GOLDEN_RATIO
+    return 0.78
+
+
 def build_background(corrected: Image.Image, cfg: Config) -> Image.Image:
     canvas_size = (cfg.canvas.width, cfg.canvas.height)
-    bg_src = apply_safe_crop(corrected, cfg.background.safe_crop_pct)
+    bg_src = apply_safe_crop(corrected, cfg.background.safe_crop)
 
-    # 先按更大目标做 cover，再中心裁回画布，实现“额外放大”且不露边。
     scaled_target = (
         int(round(cfg.canvas.width * cfg.background.extra_scale)),
         int(round(cfg.canvas.height * cfg.background.extra_scale)),
@@ -212,7 +278,6 @@ def apply_unsharp(img: Image.Image, sharpen: Sharpen) -> Image.Image:
 
 
 def process_one(image_path: Path, cfg: Config, dry_run: bool = False) -> None:
-    canvas_size = (cfg.canvas.width, cfg.canvas.height)
     output_name = f"{image_path.stem}{cfg.output_suffix}.{cfg.output_extension}"
     output_path = cfg.out_dir / output_name
     done_path = cfg.done_dir / image_path.name
@@ -227,11 +292,12 @@ def process_one(image_path: Path, cfg: Config, dry_run: bool = False) -> None:
 
     with Image.open(image_path) as src:
         corrected = ImageOps.exif_transpose(src).convert("RGB")
-
         bg = build_background(corrected, cfg)
 
-        target_fg_w = int(cfg.canvas.width * cfg.foreground.width_ratio)
-        fg = resize_contain(corrected, (target_fg_w, cfg.canvas.height))
+        paper_ratio = get_paper_scale_ratio(cfg)
+        target_paper_w = max(1, int(round(cfg.canvas.width * paper_ratio)))
+        target_paper_h = max(1, int(round(cfg.canvas.height * paper_ratio)))
+        fg = resize_contain(corrected, (target_paper_w, target_paper_h))
 
         if cfg.sharpen.enabled and cfg.sharpen.target in {"foreground", "all"}:
             fg = apply_unsharp(fg, cfg.sharpen)
@@ -278,7 +344,7 @@ def main() -> int:
 
         images = list(iter_images(cfg.inbox_dir, cfg.supported_extensions))
         if not images:
-            print(f"[INFO] 未在 {cfg.inbox_dir} 找到可处理图片。")
+            print("No images found in inbox/")
             return 0
 
         for img_path in images:

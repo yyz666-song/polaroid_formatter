@@ -87,7 +87,20 @@ def apply_logo_overlay(composed: Image.Image, cfg: "Config") -> Image.Image:
     w, h = composed.size
     overlay_w, overlay_h = overlay.size
 
-    if cfg.logo.placement == "bottom_center":
+    if cfg.logo.placement == "frame_bottom_center":
+        band_top = int(round(h * cfg.logo.bottom_band.top_ratio))
+        band_bottom = int(round(h * cfg.logo.bottom_band.bottom_ratio))
+        band_top = max(0, min(band_top, h - 1))
+        band_bottom = max(band_top + 1, min(band_bottom, h))
+        band_h = max(1, band_bottom - band_top)
+
+        x = (w - overlay_w) // 2
+        y = band_top + int(round((band_h - overlay_h) * cfg.logo.bottom_band.y_bias))
+        y = min(max(y, band_top), band_bottom - overlay_h)
+
+        y = min(y, h - margin - overlay_h)
+        x = max(margin, min(x, w - margin - overlay_w))
+    elif cfg.logo.placement == "bottom_center":
         x = (w - overlay_w) // 2
         y = h - margin - overlay_h
     elif cfg.logo.placement == "custom":

@@ -38,9 +38,9 @@
   ],
   "logo": {
     "enabled": true,
-    "placement": "bottom_right",
-    "margin_ratio": 0.035,
-    "scale_ratio": 0.06,
+    "placement": "frame_bottom_center",
+    "margin_ratio": 0.02,
+    "scale_ratio": 0.055,
     "gap_ratio": 0.012,
     "opacity": 0.9,
     "library": {
@@ -52,6 +52,11 @@
     "brand_key": "brand_a",
     "model_key": "now",
     "brand_path": null,
-    "model_path": null
+    "model_path": null,
+    "bottom_band": {
+      "top_ratio": 0.78,
+      "bottom_ratio": 0.98,
+      "y_bias": 0.72
+    }
   }
 }

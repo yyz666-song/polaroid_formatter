@@ -97,6 +97,30 @@ class LogoConfig:
 
 
 @dataclass
+class BottomBand:
+    top_ratio: float
+    bottom_ratio: float
+    y_bias: float
+
+
+@dataclass
+class LogoConfig:
+    enabled: bool
+    placement: str
+    custom_xy_ratio: tuple[float, float]
+    margin_ratio: float
+    scale_ratio: float
+    gap_ratio: float
+    opacity: float
+    bottom_band: BottomBand
+    library: dict[str, str]
+    brand_key: str
+    model_key: str
+    brand_path: str | None
+    model_path: str | None
+
+
+@dataclass
 class Config:
     inbox_dir: Path
     out_dir: Path
@@ -172,6 +196,13 @@ def load_config(path: Path) -> Config:
         custom_xy_raw = logo_raw.get("custom_xy_ratio", [0.90, 0.93])
         custom_xy_ratio = (float(custom_xy_raw[0]), float(custom_xy_raw[1]))
 
+        band_raw = logo_raw.get("bottom_band", {})
+        bottom_band = BottomBand(
+            top_ratio=float(band_raw.get("top_ratio", 0.78)),
+            bottom_ratio=float(band_raw.get("bottom_ratio", 0.98)),
+            y_bias=float(band_raw.get("y_bias", 0.72)),
+        )
+
         logo = LogoConfig(
             enabled=bool(logo_raw.get("enabled", False)),
             placement=str(logo_raw.get("placement", "bottom_right")).lower(),
@@ -180,6 +211,7 @@ def load_config(path: Path) -> Config:
             scale_ratio=float(logo_raw.get("scale_ratio", 0.060)),
             gap_ratio=float(logo_raw.get("gap_ratio", 0.012)),
             opacity=float(logo_raw.get("opacity", 0.90)),
+            bottom_band=bottom_band,
             library=logo_library,
             brand_key=str(logo_raw.get("brand_key", "none")).lower(),
             model_key=str(logo_raw.get("model_key", "none")).lower(),
@@ -243,14 +275,18 @@ def validate_config(config: Config) -> None:
     if config.sharpen.radius < 0 or config.sharpen.percent < 0 or config.sharpen.threshold < 0:
         raise ValueError("锐化参数不能为负数")
 
-    if config.logo.placement not in {"bottom_right", "bottom_center", "custom"}:
-        raise ValueError("logo.placement 仅支持 bottom_right、bottom_center、custom")
+    if config.logo.placement not in {"bottom_right", "bottom_center", "custom", "frame_bottom_center"}:
+        raise ValueError("logo.placement 仅支持 bottom_right、bottom_center、custom、frame_bottom_center")
     if any(v < 0 or v > 0.2 for v in (config.logo.margin_ratio, config.logo.scale_ratio, config.logo.gap_ratio)):
         raise ValueError("logo 比例参数需在 0~0.2 范围")
     if not (0 <= config.logo.opacity <= 1):
         raise ValueError("logo.opacity 必须在 0~1 范围")
     if len(config.logo.custom_xy_ratio) != 2 or any(v < 0 or v > 1 for v in config.logo.custom_xy_ratio):
         raise ValueError("logo.custom_xy_ratio 需要两个 0~1 范围的值")
+    if not (0 <= config.logo.bottom_band.top_ratio < config.logo.bottom_band.bottom_ratio <= 1):
+        raise ValueError("logo.bottom_band 的 top_ratio/bottom_ratio 需要满足 0<=top<bottom<=1")
+    if not (0 <= config.logo.bottom_band.y_bias <= 1):
+        raise ValueError("logo.bottom_band.y_bias 必须在 0~1 范围")
     if config.logo.brand_key == "" or config.logo.model_key == "":
         raise ValueError("logo.brand_key 与 logo.model_key 不能为空")
     if any(not key for key in config.logo.library):

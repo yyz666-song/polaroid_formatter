@@ -39,29 +39,19 @@
   "logo": {
     "enabled": true,
     "placement": "bottom_right",
-    "custom_xy_ratio": [
-      0.9,
-      0.93
-    ],
     "margin_ratio": 0.035,
     "scale_ratio": 0.06,
     "gap_ratio": 0.012,
     "opacity": 0.9,
-    "brand": {
-      "type": "image",
-      "image_path": "assets/logos/polaroid.png",
-      "text": "Polaroid"
+    "library": {
+      "brand_a": "assets/logos/brand_a.png",
+      "brand_b": "assets/logos/brand_b.png",
+      "now": "assets/logos/model_now.png",
+      "go": "assets/logos/model_go.png"
     },
-    "model": {
-      "type": "text",
-      "image_path": null,
-      "text": "Now+"
-    },
-    "text_color": [
-      255,
-      255,
-      255
-    ],
-    "font_path": "assets/fonts/Inter-SemiBold.ttf"
+    "brand_key": "brand_a",
+    "model_key": "now",
+    "brand_path": null,
+    "model_path": null
   }
 }

@@ -81,6 +81,22 @@ class LogoConfig:
     font_path: str | None
 
 @dataclass
+class LogoConfig:
+    enabled: bool
+    placement: str
+    custom_xy_ratio: tuple[float, float]
+    margin_ratio: float
+    scale_ratio: float
+    gap_ratio: float
+    opacity: float
+    library: dict[str, str]
+    brand_key: str
+    model_key: str
+    brand_path: str | None
+    model_path: str | None
+
+
+@dataclass
 class Config:
     inbox_dir: Path
     out_dir: Path
@@ -148,14 +164,13 @@ def load_config(path: Path) -> Config:
         )
 
         logo_raw = raw.get("logo", {})
-        brand_raw = logo_raw.get("brand", {})
-        model_raw = logo_raw.get("model", {})
+        library_raw = logo_raw.get("library", {})
+        if not isinstance(library_raw, dict):
+            raise ValueError("logo.library 必须是对象映射")
+        logo_library = {str(k).lower(): str(v) for k, v in library_raw.items()}
 
         custom_xy_raw = logo_raw.get("custom_xy_ratio", [0.90, 0.93])
         custom_xy_ratio = (float(custom_xy_raw[0]), float(custom_xy_raw[1]))
-
-        text_color_raw = logo_raw.get("text_color", [255, 255, 255])
-        text_color = (int(text_color_raw[0]), int(text_color_raw[1]), int(text_color_raw[2]))
 
         logo = LogoConfig(
             enabled=bool(logo_raw.get("enabled", False)),
@@ -165,26 +180,11 @@ def load_config(path: Path) -> Config:
             scale_ratio=float(logo_raw.get("scale_ratio", 0.060)),
             gap_ratio=float(logo_raw.get("gap_ratio", 0.012)),
             opacity=float(logo_raw.get("opacity", 0.90)),
-            brand=LogoItem(
-                type=str(brand_raw.get("type", "text")).lower(),
-                image_path=(
-                    str(brand_raw.get("image_path"))
-                    if brand_raw.get("image_path") is not None
-                    else None
-                ),
-                text=(str(brand_raw.get("text")) if brand_raw.get("text") is not None else None),
-            ),
-            model=LogoItem(
-                type=str(model_raw.get("type", "text")).lower(),
-                image_path=(
-                    str(model_raw.get("image_path"))
-                    if model_raw.get("image_path") is not None
-                    else None
-                ),
-                text=(str(model_raw.get("text")) if model_raw.get("text") is not None else None),
-            ),
-            text_color=text_color,
-            font_path=(str(logo_raw.get("font_path")) if logo_raw.get("font_path") is not None else None),
+            library=logo_library,
+            brand_key=str(logo_raw.get("brand_key", "none")).lower(),
+            model_key=str(logo_raw.get("model_key", "none")).lower(),
+            brand_path=(str(logo_raw.get("brand_path")) if logo_raw.get("brand_path") is not None else None),
+            model_path=(str(logo_raw.get("model_path")) if logo_raw.get("model_path") is not None else None),
         )
 
         config = Config(
@@ -204,7 +204,7 @@ def load_config(path: Path) -> Config:
                 ext.lower() for ext in raw.get("supported_extensions", [".jpg", ".jpeg", ".png", ".webp"])
             ),
         )
-    except (IndexError, KeyError, TypeError, ValueError) as exc:
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"配置文件格式错误: {exc}") from exc
 
     validate_config(config)
@@ -251,10 +251,10 @@ def validate_config(config: Config) -> None:
         raise ValueError("logo.opacity 必须在 0~1 范围")
     if len(config.logo.custom_xy_ratio) != 2 or any(v < 0 or v > 1 for v in config.logo.custom_xy_ratio):
         raise ValueError("logo.custom_xy_ratio 需要两个 0~1 范围的值")
-    if len(config.logo.text_color) != 3 or any(v < 0 or v > 255 for v in config.logo.text_color):
-        raise ValueError("logo.text_color 需要三个 0~255 的值")
-    if config.logo.brand.type not in {"image", "text"} or config.logo.model.type not in {"image", "text"}:
-        raise ValueError("logo.brand.type 和 logo.model.type 仅支持 image 或 text")
+    if config.logo.brand_key == "" or config.logo.model_key == "":
+        raise ValueError("logo.brand_key 与 logo.model_key 不能为空")
+    if any(not key for key in config.logo.library):
+        raise ValueError("logo.library 的 key 不能为空")
 
 
 def iter_images(inbox: Path, exts: tuple[str, ...]) -> Iterable[Path]:

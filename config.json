@@ -14,9 +14,9 @@
   },
   "background": {
     "bg_safe_crop": {
-      "l": 0.10,
-      "r": 0.10,
-      "t": 0.10,
+      "l": 0.1,
+      "r": 0.1,
+      "t": 0.1,
       "b": 0.22
     },
     "bg_extra_scale": 1.35,
@@ -35,5 +35,33 @@
     ".jpeg",
     ".png",
     ".webp"
-  ]
+  ],
+  "logo": {
+    "enabled": true,
+    "placement": "bottom_right",
+    "custom_xy_ratio": [
+      0.9,
+      0.93
+    ],
+    "margin_ratio": 0.035,
+    "scale_ratio": 0.06,
+    "gap_ratio": 0.012,
+    "opacity": 0.9,
+    "brand": {
+      "type": "image",
+      "image_path": "assets/logos/polaroid.png",
+      "text": "Polaroid"
+    },
+    "model": {
+      "type": "text",
+      "image_path": null,
+      "text": "Now+"
+    },
+    "text_color": [
+      255,
+      255,
+      255
+    ],
+    "font_path": "assets/fonts/Inter-SemiBold.ttf"
+  }
 }

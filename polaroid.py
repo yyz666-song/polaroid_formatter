@@ -14,7 +14,8 @@ from typing import Iterable
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
-from logo_overlay import apply_logo_overlay
+from logo_overlay import apply_single_logo_bottom_center, resolve_logo_path
+from logo_settings import AUTO_SCAN, BOTTOM_BAND, LOGO_DIR, LOGO_ID, LOGO_LIST, MARGIN_RATIO, OPACITY, SCALE_RATIO
 
 MIN_SAFE_KEEP_RATIO = 0.60
 GOLDEN_RATIO = 1.618
@@ -89,6 +90,30 @@ class LogoConfig:
     scale_ratio: float
     gap_ratio: float
     opacity: float
+    library: dict[str, str]
+    brand_key: str
+    model_key: str
+    brand_path: str | None
+    model_path: str | None
+
+
+@dataclass
+class BottomBand:
+    top_ratio: float
+    bottom_ratio: float
+    y_bias: float
+
+
+@dataclass
+class LogoConfig:
+    enabled: bool
+    placement: str
+    custom_xy_ratio: tuple[float, float]
+    margin_ratio: float
+    scale_ratio: float
+    gap_ratio: float
+    opacity: float
+    bottom_band: BottomBand
     library: dict[str, str]
     brand_key: str
     model_key: str
@@ -426,8 +451,21 @@ def process_one(image_path: Path, cfg: Config, dry_run: bool = False) -> None:
         if cfg.sharpen.enabled and cfg.sharpen.target == "all":
             composed = apply_unsharp(composed, cfg.sharpen)
 
-        if cfg.logo.enabled:
-            composed = apply_logo_overlay(composed, cfg)
+        selected_logo_path = resolve_logo_path(
+            logo_id=LOGO_ID,
+            logo_dir=LOGO_DIR,
+            logo_list=LOGO_LIST,
+            auto_scan=AUTO_SCAN,
+        )
+        if selected_logo_path:
+            composed = apply_single_logo_bottom_center(
+                composed=composed,
+                logo_path=selected_logo_path,
+                margin_ratio=MARGIN_RATIO,
+                scale_ratio=SCALE_RATIO,
+                opacity=OPACITY,
+                bottom_band_cfg=BOTTOM_BAND,
+            )
 
         composed = composed.convert("RGB")
         composed.save(

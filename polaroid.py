@@ -14,6 +14,8 @@ from typing import Iterable
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
+from logo_overlay import apply_logo_overlay
+
 MIN_SAFE_KEEP_RATIO = 0.60
 GOLDEN_RATIO = 1.618
 
@@ -56,6 +58,30 @@ class Sharpen:
 
 
 @dataclass
+class BottomBand:
+    top_ratio: float
+    bottom_ratio: float
+    y_bias: float
+
+
+@dataclass
+class LogoConfig:
+    enabled: bool
+    placement: str
+    custom_xy_ratio: tuple[float, float]
+    margin_ratio: float
+    scale_ratio: float
+    gap_ratio: float
+    opacity: float
+    bottom_band: BottomBand
+    library: dict[str, str]
+    brand_key: str
+    model_key: str
+    brand_path: str | None
+    model_path: str | None
+
+
+@dataclass
 class Config:
     inbox_dir: Path
     out_dir: Path
@@ -66,6 +92,7 @@ class Config:
     foreground: Foreground
     background: Background
     sharpen: Sharpen
+    logo: LogoConfig
     jpeg_quality: int
     move_processed_to_done: bool
     supported_extensions: tuple[str, ...]
@@ -121,6 +148,38 @@ def load_config(path: Path) -> Config:
             threshold=int(raw.get("sharpen_threshold", 3)),
         )
 
+        logo_raw = raw.get("logo", {})
+        library_raw = logo_raw.get("library", {})
+        if not isinstance(library_raw, dict):
+            raise ValueError("logo.library 必须是对象映射")
+        logo_library = {str(k).lower(): str(v) for k, v in library_raw.items()}
+
+        custom_xy_raw = logo_raw.get("custom_xy_ratio", [0.90, 0.93])
+        custom_xy_ratio = (float(custom_xy_raw[0]), float(custom_xy_raw[1]))
+
+        band_raw = logo_raw.get("bottom_band", {})
+        bottom_band = BottomBand(
+            top_ratio=float(band_raw.get("top_ratio", 0.78)),
+            bottom_ratio=float(band_raw.get("bottom_ratio", 0.98)),
+            y_bias=float(band_raw.get("y_bias", 0.72)),
+        )
+
+        logo = LogoConfig(
+            enabled=bool(logo_raw.get("enabled", False)),
+            placement=str(logo_raw.get("placement", "bottom_right")).lower(),
+            custom_xy_ratio=custom_xy_ratio,
+            margin_ratio=float(logo_raw.get("margin_ratio", 0.035)),
+            scale_ratio=float(logo_raw.get("scale_ratio", 0.060)),
+            gap_ratio=float(logo_raw.get("gap_ratio", 0.012)),
+            opacity=float(logo_raw.get("opacity", 0.90)),
+            bottom_band=bottom_band,
+            library=logo_library,
+            brand_key=str(logo_raw.get("brand_key", "none")).lower(),
+            model_key=str(logo_raw.get("model_key", "none")).lower(),
+            brand_path=(str(logo_raw.get("brand_path")) if logo_raw.get("brand_path") is not None else None),
+            model_path=(str(logo_raw.get("model_path")) if logo_raw.get("model_path") is not None else None),
+        )
+
         config = Config(
             inbox_dir=Path(raw["inbox_dir"]),
             out_dir=Path(raw["out_dir"]),
@@ -131,13 +190,14 @@ def load_config(path: Path) -> Config:
             foreground=foreground,
             background=background,
             sharpen=sharpen,
+            logo=logo,
             jpeg_quality=int(raw.get("jpeg_quality", 92)),
             move_processed_to_done=bool(raw.get("move_processed_to_done", True)),
             supported_extensions=tuple(
                 ext.lower() for ext in raw.get("supported_extensions", [".jpg", ".jpeg", ".png", ".webp"])
             ),
         )
-    except (KeyError, TypeError, ValueError) as exc:
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"配置文件格式错误: {exc}") from exc
 
     validate_config(config)
@@ -175,6 +235,23 @@ def validate_config(config: Config) -> None:
         raise ValueError("sharpen_target 仅支持 foreground 或 all")
     if config.sharpen.radius < 0 or config.sharpen.percent < 0 or config.sharpen.threshold < 0:
         raise ValueError("锐化参数不能为负数")
+
+    if config.logo.placement not in {"bottom_right", "bottom_center", "custom", "frame_bottom_center"}:
+        raise ValueError("logo.placement 仅支持 bottom_right、bottom_center、custom、frame_bottom_center")
+    if any(v < 0 or v > 0.2 for v in (config.logo.margin_ratio, config.logo.scale_ratio, config.logo.gap_ratio)):
+        raise ValueError("logo 比例参数需在 0~0.2 范围")
+    if not (0 <= config.logo.opacity <= 1):
+        raise ValueError("logo.opacity 必须在 0~1 范围")
+    if len(config.logo.custom_xy_ratio) != 2 or any(v < 0 or v > 1 for v in config.logo.custom_xy_ratio):
+        raise ValueError("logo.custom_xy_ratio 需要两个 0~1 范围的值")
+    if not (0 <= config.logo.bottom_band.top_ratio < config.logo.bottom_band.bottom_ratio <= 1):
+        raise ValueError("logo.bottom_band 的 top_ratio/bottom_ratio 需要满足 0<=top<bottom<=1")
+    if not (0 <= config.logo.bottom_band.y_bias <= 1):
+        raise ValueError("logo.bottom_band.y_bias 必须在 0~1 范围")
+    if config.logo.brand_key == "" or config.logo.model_key == "":
+        raise ValueError("logo.brand_key 与 logo.model_key 不能为空")
+    if any(not key for key in config.logo.library):
+        raise ValueError("logo.library 的 key 不能为空")
 
 
 def iter_images(inbox: Path, exts: tuple[str, ...]) -> Iterable[Path]:
@@ -309,6 +386,9 @@ def process_one(image_path: Path, cfg: Config, dry_run: bool = False) -> None:
 
         if cfg.sharpen.enabled and cfg.sharpen.target == "all":
             composed = apply_unsharp(composed, cfg.sharpen)
+
+        if cfg.logo.enabled:
+            composed = apply_logo_overlay(composed, cfg)
 
         composed = composed.convert("RGB")
         composed.save(

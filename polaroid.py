@@ -57,6 +57,29 @@ class Sharpen:
     threshold: int
 
 
+
+
+@dataclass
+class LogoItem:
+    type: str
+    image_path: str | None
+    text: str | None
+
+
+@dataclass
+class LogoConfig:
+    enabled: bool
+    placement: str
+    custom_xy_ratio: tuple[float, float]
+    margin_ratio: float
+    scale_ratio: float
+    gap_ratio: float
+    opacity: float
+    brand: LogoItem
+    model: LogoItem
+    text_color: tuple[int, int, int]
+    font_path: str | None
+
 @dataclass
 class LogoConfig:
     enabled: bool

@@ -1,7 +1,7 @@
 # Polaroid Formatter
 
 一个基于 **Python 3 + Pillow** 的批处理工具，用于把宝丽来扫描照片统一成固定版式输出。
-
+assets/demo.png
 
 ## 功能特性
 

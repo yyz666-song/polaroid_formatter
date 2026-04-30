@@ -92,19 +92,28 @@ python polaroid.py [--config config.json] [--dry-run] [--once]
 - `--dry-run`：仅预览文件，不写出/移动
 - `--once`：单次处理后退出
 
-### 前端界面（Streamlit）
+### 桌面界面（可打包为 EXE）
 
-如果你希望可视化操作、上传预览并下载结果，可运行：
+如果你希望直接打开一个有界面的程序（左侧原图、右侧输出图），可运行：
 
 ```bash
-streamlit run web_app.py
+python gui_app.py
 ```
 
-打开浏览器后可：
+界面支持：
 
-- 上传单张图片并实时预览「原图 / 成片」对比
-- 读取 `config.json` 保持与批处理一致的风格参数
-- 一键下载处理结果（JPEG）
+- 左侧导入原图，右侧实时显示输出结果
+- 手动选择要叠加的 icon（PNG）
+- 一键保存输出 JPEG
+
+#### 打包成 Windows EXE（推荐 PyInstaller）
+
+```bash
+pip install pyinstaller
+pyinstaller --noconfirm --onefile --windowed gui_app.py
+```
+
+生成文件位置：`dist/gui_app.exe`
 
 ---
 

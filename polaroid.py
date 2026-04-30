@@ -61,115 +61,6 @@ class Sharpen:
 
 
 @dataclass
-class LogoItem:
-    type: str
-    image_path: str | None
-    text: str | None
-
-
-@dataclass
-class LogoConfig:
-    enabled: bool
-    placement: str
-    custom_xy_ratio: tuple[float, float]
-    margin_ratio: float
-    scale_ratio: float
-    gap_ratio: float
-    opacity: float
-    brand: LogoItem
-    model: LogoItem
-    text_color: tuple[int, int, int]
-    font_path: str | None
-
-@dataclass
-class LogoConfig:
-    enabled: bool
-    placement: str
-    custom_xy_ratio: tuple[float, float]
-    margin_ratio: float
-    scale_ratio: float
-    gap_ratio: float
-    opacity: float
-    library: dict[str, str]
-    brand_key: str
-    model_key: str
-    brand_path: str | None
-    model_path: str | None
-
-
-@dataclass
-class BottomBand:
-    top_ratio: float
-    bottom_ratio: float
-    y_bias: float
-
-
-@dataclass
-class LogoConfig:
-    enabled: bool
-    placement: str
-    custom_xy_ratio: tuple[float, float]
-    margin_ratio: float
-    scale_ratio: float
-    gap_ratio: float
-    opacity: float
-    bottom_band: BottomBand
-    library: dict[str, str]
-    brand_key: str
-    model_key: str
-    brand_path: str | None
-    model_path: str | None
-
-
-@dataclass
-class BottomBand:
-    top_ratio: float
-    bottom_ratio: float
-    y_bias: float
-
-
-@dataclass
-class LogoConfig:
-    enabled: bool
-    placement: str
-    custom_xy_ratio: tuple[float, float]
-    margin_ratio: float
-    scale_ratio: float
-    gap_ratio: float
-    opacity: float
-    bottom_band: BottomBand
-    library: dict[str, str]
-    brand_key: str
-    model_key: str
-    brand_path: str | None
-    model_path: str | None
-
-
-@dataclass
-class BottomBand:
-    top_ratio: float
-    bottom_ratio: float
-    y_bias: float
-
-
-@dataclass
-class LogoConfig:
-    enabled: bool
-    placement: str
-    custom_xy_ratio: tuple[float, float]
-    margin_ratio: float
-    scale_ratio: float
-    gap_ratio: float
-    opacity: float
-    bottom_band: BottomBand
-    library: dict[str, str]
-    brand_key: str
-    model_key: str
-    brand_path: str | None
-    model_path: str | None
-
-
-@dataclass
 class BottomBand:
     top_ratio: float
     bottom_ratio: float
@@ -466,7 +357,7 @@ def apply_unsharp(img: Image.Image, sharpen: Sharpen) -> Image.Image:
     )
 
 
-def render_polaroid(corrected: Image.Image, cfg: Config) -> Image.Image:
+def render_polaroid(corrected: Image.Image, cfg: Config, selected_logo_path: str | None = None) -> Image.Image:
     bg = build_background(corrected, cfg)
 
     paper_ratio = get_paper_scale_ratio(cfg)
@@ -485,12 +376,13 @@ def render_polaroid(corrected: Image.Image, cfg: Config) -> Image.Image:
     if cfg.sharpen.enabled and cfg.sharpen.target == "all":
         composed = apply_unsharp(composed, cfg.sharpen)
 
-    selected_logo_path = resolve_logo_path(
-        logo_id=LOGO_ID,
-        logo_dir=LOGO_DIR,
-        logo_list=LOGO_LIST,
-        auto_scan=AUTO_SCAN,
-    )
+    if selected_logo_path is None:
+        selected_logo_path = resolve_logo_path(
+            logo_id=LOGO_ID,
+            logo_dir=LOGO_DIR,
+            logo_list=LOGO_LIST,
+            auto_scan=AUTO_SCAN,
+        )
     if selected_logo_path:
         composed = apply_single_logo_bottom_center(
             composed=composed,

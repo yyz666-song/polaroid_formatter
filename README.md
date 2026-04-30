@@ -92,6 +92,29 @@ python polaroid.py [--config config.json] [--dry-run] [--once]
 - `--dry-run`：仅预览文件，不写出/移动
 - `--once`：单次处理后退出
 
+### 桌面界面（可打包为 EXE）
+
+如果你希望直接打开一个有界面的程序（左侧原图、右侧输出图），可运行：
+
+```bash
+python gui_app.py
+```
+
+界面支持：
+
+- 左侧导入原图，右侧实时显示输出结果
+- 手动选择要叠加的 icon（PNG）
+- 一键保存输出 JPEG
+
+#### 打包成 Windows EXE（推荐 PyInstaller）
+
+```bash
+pip install pyinstaller
+pyinstaller --noconfirm --onefile --windowed gui_app.py
+```
+
+生成文件位置：`dist/gui_app.exe`
+
 ---
 
 ## 配置说明（config.json）

@@ -104,7 +104,7 @@ python gui_app.py
 
 - 左侧导入原图，右侧实时显示输出结果
 - 手动选择要叠加的 icon（PNG）
-- 一键保存输出 JPEG
+- 生成预览后可保存 PNG / JPEG
 
 #### 打包成 Windows EXE（推荐 PyInstaller）
 
@@ -114,6 +114,17 @@ pyinstaller --noconfirm --onefile --windowed gui_app.py
 ```
 
 生成文件位置：`dist/gui_app.exe`
+
+若需要将配置与 logo 素材一并打包，可使用（Windows）：
+
+```bash
+pyinstaller --noconfirm --onefile --windowed ^
+  --add-data "config.json;." ^
+  --add-data "assets/logos;assets/logos" ^
+  gui_app.py
+```
+
+> 说明：当前仓库未保留 `web_app.py`，因此没有 Streamlit/Web UI 入口命令。
 
 ---
 

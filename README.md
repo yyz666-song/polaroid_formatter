@@ -92,6 +92,20 @@ python polaroid.py [--config config.json] [--dry-run] [--once]
 - `--dry-run`：仅预览文件，不写出/移动
 - `--once`：单次处理后退出
 
+### 前端界面（Streamlit）
+
+如果你希望可视化操作、上传预览并下载结果，可运行：
+
+```bash
+streamlit run web_app.py
+```
+
+打开浏览器后可：
+
+- 上传单张图片并实时预览「原图 / 成片」对比
+- 读取 `config.json` 保持与批处理一致的风格参数
+- 一键下载处理结果（JPEG）
+
 ---
 
 ## 配置说明（config.json）
